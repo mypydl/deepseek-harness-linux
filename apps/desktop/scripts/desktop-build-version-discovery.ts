@@ -2,7 +2,7 @@
  * Suggest the next build version for a product version, so the sequence number
  * is derived rather than remembered.
  *
- * `apps/desktop/packaging/README.md#release-versions` gives the form as `<product version>.<date>.<index>`
+ * `apps/desktop/README.md` gives the form as `<product version>.<date>.<index>`
  * for a prerelease base and `<product version>-test.<date>.<index>` for a
  * stable one. What makes an index correct is which ones are taken, and that is
  * recorded where the builds went: the update bucket for an uploaded build, the
@@ -30,8 +30,19 @@ const LISTING_DEADLINE_MS = 8_000
 /** Objects one listing page may return. */
 const LISTING_PAGE_SIZE = 1000
 
-/** Artifact name electron-builder writes for one build, on either platform; unsigned and unnotarized builds add a suffix. */
-const ARTIFACT = /(?:^|\/)deepseek-harness-(?<version>.+)-(?:mac|win)-(?:arm64|x64)(?:-unsigned|-unnotarized)?\.(?:exe|dmg|zip)$/u
+/** Artifact base name electron-builder writes for one build; unsigned and unnotarized builds add a suffix. */
+const ARTIFACT = /(?:^|\/)deepseek-harness-(?<version>.+)-(?:mac|win|linux)-(?:arm64|x64)(?:-unsigned|-unnotarized)?\./u
+/** Installer extensions electron-builder emits for the supported platforms. */
+const INSTALLER = /(?:exe|dmg|zip|AppImage|deb|tar\.gz)$/u
+
+/**
+ * Parse the version one artifact name carries.
+ * @param name - Artifact file name or bucket key to inspect.
+ * @returns the embedded version, or `undefined` when the name is not a build installer.
+ */
+function artifactVersion(name: string): string | undefined {
+  return INSTALLER.test(name) ? ARTIFACT.exec(name)?.groups?.version : undefined
+}
 
 /** Inputs that decide which versions are already taken. */
 export interface DesktopBuildVersionSuggestionOptions {
@@ -77,7 +88,7 @@ function sequenceNumbers(versions: Iterable<string>, prefix: string): number[] {
  */
 async function localVersions(artifactsRoot: string): Promise<string[]> {
   const entries = await readdir(artifactsRoot).catch(() => [])
-  return entries.map(entry => ARTIFACT.exec(entry)?.groups?.version)
+  return entries.map(entry => artifactVersion(entry))
     .filter((version): version is string => version !== undefined && parse(version) !== null)
 }
 
@@ -87,8 +98,9 @@ async function localVersions(artifactsRoot: string): Promise<string[]> {
  * @returns Versions parsed from object names, or undefined when the bucket cannot be listed completely in time.
  */
 async function remoteVersions(options: DesktopBuildVersionSuggestionOptions): Promise<string[] | undefined> {
-  const platform = options.target === 'win-x64' ? 'win32' as const : 'darwin' as const
-  const arch = options.target === 'mac-arm64' ? 'arm64' : 'x64'
+  const platform = options.target === 'win-x64' ? 'win32' as const
+    : options.target === 'linux-x64' || options.target === 'linux-arm64' ? 'linux' as const : 'darwin' as const
+  const arch = options.target === 'mac-arm64' || options.target === 'linux-arm64' ? 'arm64' : 'x64'
   // An unconfigured destination has nothing to be unique against; an invalid one must not be mistaken for it.
   if (options.environment[DESKTOP_AUTO_UPDATE_ENV] === undefined
     && options.environment.DOWNLOAD_TEST_ORIGIN === undefined) return undefined
@@ -123,7 +135,7 @@ async function remoteVersions(options: DesktopBuildVersionSuggestionOptions): Pr
         }),
       ])
       for (const key of page.keys) {
-        const version = ARTIFACT.exec(key)?.groups?.version
+        const version = artifactVersion(key)
         if (version !== undefined && parse(version) !== null) versions.push(version)
       }
       marker = page.next

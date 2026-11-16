@@ -66,7 +66,14 @@ export function createElectronBuilderConfig(
   if (skipNotarization && (unsigned || resolvedPlatform !== 'darwin')) throw new Error('Skipping notarization requires a signed macOS build')
   const packagesMacOS = targetPlatform === 'darwin' || (targetPlatform === undefined && hostPlatform === 'darwin')
   const packagesWindows = resolvedPlatform === 'win32'
-  const policy = packagesMacOS && unsigned ? undefined : resolveDesktopPolicyEnvironment(env)
+  const packagesLinux = resolvedPlatform === 'linux'
+  // The mandatory-update policy is implemented for Windows and macOS only. main.ts throws
+  // "desktop policy: unsupported platform" the moment a packaged manifest carries one on any
+  // other platform, so a Linux build that ships the policy greets the user with the fatal
+  // startup dialog instead of a window. Omitting it here is what makes the Linux app
+  // launchable. Auto updates are unaffected: they read app-update.yml, not this policy.
+  const policy = packagesMacOS && unsigned ? undefined
+    : ['win32', 'darwin'].includes(resolvedPlatform) ? resolveDesktopPolicyEnvironment(env) : undefined
   if (resolvedPlatform === 'win32') installWindowsDirectoryInstaller()
   const macOSSigning = packagesMacOS && !unsigned ? resolveMacOSSigningEnvironment(env) : undefined
   if (packagesMacOS && !unsigned && !skipNotarization) resolveMacOSNotarizationEnvironment(env)
@@ -159,7 +166,8 @@ export function createElectronBuilderConfig(
     asarUnpack: unpack,
     extraResources: [
       { from: buildPaths.runtime, to: 'runtime' },
-      { from: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)), to: 'icon.png' },
+      // Windows and Linux share the extra-resource name; each uses its own artwork.
+      { from: fileURLToPath(new URL(packagesLinux ? '../resources/icon.png' : '../resources/icon-windows.png', import.meta.url)), to: 'icon.png' },
       // Windows tray bitmaps; macOS keeps the Dock and ships no menu bar icon.
       ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
     ],
@@ -255,8 +263,14 @@ export function createElectronBuilderConfig(
       target: ['nsis'],
     },
     linux: {
+      icon: fileURLToPath(new URL('../resources/icon.png', import.meta.url)),
+      executableName: 'deepseek-harness',
       category: 'Development',
-      target: ['AppImage'],
+      // deb packaging requires a maintainer; AppImage ignores it.
+      maintainer: 'DeepSeek Harness Linux maintainers <maintainers@sswwgzs.cn>',
+      synopsis: 'DeepSeek Harness desktop application for Linux',
+      // AppImage is the auto-update carrier; deb and tar.gz are additional install formats.
+      target: ['AppImage', 'deb', 'tar.gz'],
     },
     nsis: {
       uninstallDisplayName: '${productName}',

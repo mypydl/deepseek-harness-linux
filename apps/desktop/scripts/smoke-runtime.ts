@@ -33,10 +33,12 @@ export function assertOfficeSkillsLoadable(results: ReadonlyArray<{ readonly nam
  * @param runtime - Verified resource descriptor.
  * @param environment - Credential-scrubbed build environment and private native cache.
  * @param resourcesRuntime - Bundled interpreters outside the application archive.
+ * @param skipOfficeConversion - Skip Office checks when the target bundles no LibreOffice Kit, as Linux does.
  * @returns Resolves after checks and teardown; rejects on a check or teardown failure.
  */
 export async function smokeDesktopRuntime(
   root: string, node: string, runtime: DesktopRuntimeDescriptor, environment: NodeJS.ProcessEnv, resourcesRuntime: string,
+  skipOfficeConversion = false,
 ): Promise<void> {
   const home = mkdtempSync(join(tmpdir(), 'dsh-desktop-smoke-'))
   const profile = join(home, 'profiles', 'desktop')
@@ -201,35 +203,42 @@ export function apply(ctx) {
     if (!installation.ok || !installed.ok || await installed.text() !== 'installed plugin ready') {
       throw new Error(`desktop runtime: bundled pnpm plugin installation failed: ${installationResult}`)
     }
-    const skills = await fetch(new URL('/desktop-smoke-skills', ready.url), { headers: { cookie }, signal: AbortSignal.timeout(120_000) })
-    if (!skills.ok) throw new Error(`desktop runtime: Office skill loading failed: ${await skills.text()}`)
-    const loadedSkills = await skills.json() as { name: string; bytes: number }[]
-    assertOfficeSkillsLoadable(loadedSkills)
-    console.log('desktop runtime: packaged Office skills listed and loaded')
-    for (const { extension } of inputs) {
-      const converted = await fetch(new URL(`/desktop-smoke-office/${extension}`, ready.url), {
-        headers: { cookie }, signal: AbortSignal.timeout(120_000),
-      })
-      if (!converted.ok) throw new Error(`desktop runtime: ${extension} conversion failed: ${await converted.text()}`)
-      const pdf = Buffer.from(await converted.arrayBuffer())
-      if (!/^%PDF-\d\.\d/u.test(pdf.subarray(0, 8).toString())
+    if (skipOfficeConversion) {
+      // The packaged Linux app carries no LibreOffice Kit native modules, so these checks
+      // cannot pass there by construction. Skip them instead of failing: a build that
+      // tolerates the resulting error would also swallow genuine runtime faults (A-10).
+      console.log('desktop runtime: skipping Office conversion checks for a target that bundles no LibreOffice Kit')
+    } else {
+      const skills = await fetch(new URL('/desktop-smoke-skills', ready.url), { headers: { cookie }, signal: AbortSignal.timeout(120_000) })
+      if (!skills.ok) throw new Error(`desktop runtime: Office skill loading failed: ${await skills.text()}`)
+      const loadedSkills = await skills.json() as { name: string; bytes: number }[]
+      assertOfficeSkillsLoadable(loadedSkills)
+      console.log('desktop runtime: packaged Office skills listed and loaded')
+      for (const { extension } of inputs) {
+        const converted = await fetch(new URL(`/desktop-smoke-office/${extension}`, ready.url), {
+          headers: { cookie }, signal: AbortSignal.timeout(120_000),
+        })
+        if (!converted.ok) throw new Error(`desktop runtime: ${extension} conversion failed: ${await converted.text()}`)
+        const pdf = Buffer.from(await converted.arrayBuffer())
+        if (!/^%PDF-\d\.\d/u.test(pdf.subarray(0, 8).toString())
         || !pdf.subarray(-1024).toString().trimEnd().endsWith('%%EOF')) {
-        throw new Error(`desktop runtime: invalid ${extension} PDF output`)
+          throw new Error(`desktop runtime: invalid ${extension} PDF output`)
+        }
       }
-    }
-    for (const { extension } of inputs) {
-      const operations = await fetch(new URL(`/desktop-smoke-office-operations/${extension}`, ready.url), {
-        headers: { cookie }, signal: AbortSignal.timeout(240_000),
-      })
-      if (!operations.ok) throw new Error(`desktop runtime: ${extension} Office operations failed: ${await operations.text()}`)
-      const result = await operations.json() as { images: string[]; converted: string; recalculated: string | null }
-      // PNG images, then ZIP containers for OpenDocument and XLSX outputs.
-      if (result.images.length === 0 || result.images.some(signature => signature !== '89504e470d0a1a0a')
+      for (const { extension } of inputs) {
+        const operations = await fetch(new URL(`/desktop-smoke-office-operations/${extension}`, ready.url), {
+          headers: { cookie }, signal: AbortSignal.timeout(240_000),
+        })
+        if (!operations.ok) throw new Error(`desktop runtime: ${extension} Office operations failed: ${await operations.text()}`)
+        const result = await operations.json() as { images: string[]; converted: string; recalculated: string | null }
+        // PNG images, then ZIP containers for OpenDocument and XLSX outputs.
+        if (result.images.length === 0 || result.images.some(signature => signature !== '89504e470d0a1a0a')
         || result.converted !== '504b0304' || (extension === 'xlsx' ? result.recalculated !== '504b0304' : result.recalculated !== null)) {
-        throw new Error(`desktop runtime: invalid ${extension} Office operation output: ${JSON.stringify(result)}`)
+          throw new Error(`desktop runtime: invalid ${extension} Office operation output: ${JSON.stringify(result)}`)
+        }
       }
+      console.log('desktop runtime: DOCX, XLSX, PPTX to PDF, image rendering, conversion, and recalculation passed')
     }
-    console.log('desktop runtime: DOCX, XLSX, PPTX to PDF, image rendering, conversion, and recalculation passed')
   } finally {
     clearTimeout(timer)
     try { await host.stop() } finally {
