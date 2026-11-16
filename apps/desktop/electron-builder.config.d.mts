@@ -46,6 +46,15 @@ export interface DesktopElectronBuilderConfig {
       readonly signingHashAlgorithms: readonly string[]
     }
   }
+  readonly linux: {
+    readonly icon: string
+    readonly executableName: 'deepseek-harness'
+    readonly category: 'Development'
+    readonly desktop: { readonly entry: { readonly StartupWMClass: 'deepseek-ai-dsh-desktop' } }
+    readonly maintainer: string
+    readonly synopsis: string
+    readonly target: readonly ['AppImage', 'deb', 'tar.gz']
+  }
   readonly nsis: {
     readonly uninstallDisplayName: '${productName}'
     readonly include: string
