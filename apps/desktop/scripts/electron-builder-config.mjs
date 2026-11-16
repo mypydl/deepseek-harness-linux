@@ -263,7 +263,10 @@ export function createElectronBuilderConfig(
       target: ['nsis'],
     },
     linux: {
-      icon: fileURLToPath(new URL('../resources/icon.png', import.meta.url)),
+      // A directory of `NxN.png` files installs one hicolor size per file; a single PNG is
+      // installed at its own edge (1104x1104), which icon themes do not index, so launchers that
+      // integrate the AppImage show the generic fallback. See `scripts/render-linux-icons.ts`.
+      icon: fileURLToPath(new URL('../resources/icons', import.meta.url)),
       executableName: 'deepseek-harness',
       category: 'Development',
       // deb packaging requires a maintainer; AppImage ignores it.
