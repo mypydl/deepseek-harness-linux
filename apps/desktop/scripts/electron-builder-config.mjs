@@ -269,6 +269,10 @@ export function createElectronBuilderConfig(
       icon: fileURLToPath(new URL('../resources/icons', import.meta.url)),
       executableName: 'deepseek-harness',
       category: 'Development',
+      // Electron reports the window class from the packaged package.json name
+      // (@deepseek-ai/dsh-desktop), so productName would name a window no launcher owns and the
+      // dock grows a second entry without the icon. Verify with `xprop WM_CLASS` after a build.
+      desktop: { entry: { StartupWMClass: 'deepseek-ai-dsh-desktop' } },
       // deb packaging requires a maintainer; AppImage ignores it.
       maintainer: 'DeepSeek Harness Linux maintainers <maintainers@sswwgzs.cn>',
       synopsis: 'DeepSeek Harness desktop application for Linux',
